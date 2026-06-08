@@ -43,30 +43,46 @@ def get_collection() -> chromadb.Collection:
         sys.exit(f"ERROR: Collection '{COLLECTION_NAME}' not found. Run retrieval/build_index.py first.")
 
 
-def search(query: str, collection: chromadb.Collection, model: SentenceTransformer) -> None:
+def retrieve(query: str, collection: chromadb.Collection, model: SentenceTransformer) -> list[dict]:
+    """
+    Embed query and return top-K results as a list of dicts with keys:
+        text     — original chunk content (no metadata prefix)
+        meta     — full metadata dict (title, source, source_type, filename, chunk_number, ...)
+        distance — cosine distance (lower = more similar)
+    """
     query_vec = model.encode([query])[0].tolist()
-
     results = collection.query(
         query_embeddings=[query_vec],
         n_results=TOP_K,
-        include=["documents", "metadatas", "distances"],
+        include=["metadatas", "distances"],
     )
+    chunks = []
+    for meta, dist in zip(results["metadatas"][0], results["distances"][0]):
+        chunks.append({
+            "text": meta.get("chunk_text", ""),
+            "meta": meta,
+            "distance": dist,
+        })
+    return chunks
 
-    metas     = results["metadatas"][0]
-    distances = results["distances"][0]
+
+def search(query: str, collection: chromadb.Collection, model: SentenceTransformer) -> None:
+    """Pretty-print retrieval results to the terminal."""
+    chunks = retrieve(query, collection, model)
 
     print(f"\n{'=' * 70}")
     print(f"QUERY: {query}")
     print(f"{'=' * 70}")
 
-    for rank, (meta, dist) in enumerate(zip(metas, distances), start=1):
-        print(f"\n[Result {rank}  |  distance: {dist:.4f}]")
+    for rank, chunk in enumerate(chunks, start=1):
+        meta = chunk["meta"]
+        print(f"\n[Result {rank}  |  distance: {chunk['distance']:.4f}]")
         print(f"  title       : {meta['title']}")
         print(f"  source_type : {meta['source_type']}")
         print(f"  source      : {meta['source']}")
         print(f"  chunk_number: {meta['chunk_number']}")
         print(f"  text        :")
-        print(meta.get("chunk_text", ""))
+        print(chunk["text"])
         print(f"{'-' * 70}")
 
 
